@@ -96,43 +96,45 @@ There is a user button on both TX and RX board. Usually they are unused:
 
 For TX, a short press (less than 2 seconds) recalibrates the baseline. A long press (more than 2 seconds) enters Test Mode, where it sends test packets with incrementing sequence number as payload every second. It can be used to test communication range. Turn it off then on again to exit Test Mode. 
 
-For RX, a press on the button types out some debug messages. Make sure you open a text editor first. 
+For RX, a press on the button types out some debug messages. Make sure you open a text editor first. If the RX has not recieved any messages from the TX, the debug values will all be zero.
 
 ## USB Firmware Updates
 
 You can update Daytripper's firmware via USB, for bug fixes and and/or new features. 
 
-To do this, download and install the [STM32 DfuSe tool](resources/en.stsw-stm32080_stm32_DfuSe.zip) from this repo. You can download it from [the official website](https://www.st.com/en/development-tools/stsw-stm32080.html) too, but it requires creating an account.
+First, [click me](https://github.com/dekuNukem/daytripper/raw/master/resources/en.stsw-stm32080_stm32_DfuSe.zip) to download and install the `STM32 DfuSe tool` from this repo.
 
-First, locate the user button on the board:
+(You can also get it from [the official website](https://www.st.com/en/development-tools/stsw-stm32080.html), but it requires creating an account.)
+
+Locate the user button on the board:
 
 ![Alt text](resources/photos/buttons.jpg)
 
 To update firmware:
 
-* Make sure the board is OFF and unplugged.
+* Make sure the board is TURNED OFF and unplugged.
 
 * **Press and hold down the user button** while plugging it into a computer.
 
 * Once it is plugged in, you can release the button.
 
-If it all goes well, the blue LED should stay off.
+* If all goes well, the blue LED should stay off.
 
 Now launch the `DfuSeDemo` software:
 
 ![Alt text](resources/photos/dfu_start.png)
 
-In the `Available DUF Devices` section at top left corner, you should see a `STM Device in DFU Mode`.
+You should see a `STM Device in DFU Mode` in the `Available DUF Devices` section at top left corner.
 
 ![Alt text](resources/photos/dfu_available.png)
 
 Press the `Choose...` button and select a firmware file in `.dfu` format. Make sure it's the correct file!
 
-* [Click me](firmware/TX_latest.dfu) for latest default TX firmware
+* [Click me](https://github.com/dekuNukem/daytripper/raw/master/firmware/TX_latest.dfu) for latest default TX firmware
 
-* [Click me](firmware/TX_latest_blue_LED_disabled.dfu) for latest default TX firmware with blue LED turned off
+* [Click me](https://github.com/dekuNukem/daytripper/raw/master/firmware/TX_latest_blue_LED_disabled.dfu) for latest default TX firmware with blue LED turned off
 
-* [Click me](firmware/RX_latest.dfu) for latest default RX firmware
+* [Click me](https://github.com/dekuNukem/daytripper/raw/master/firmware/RX_latest.dfu) for latest default RX firmware
 
 ![Alt text](resources/photos/dfu_choose.png)
 
