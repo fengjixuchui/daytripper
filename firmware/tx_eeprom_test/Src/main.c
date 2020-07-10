@@ -60,11 +60,10 @@
 #include "animation.h"
 #include "sleepbutton.h"
 #include "ee.h"
+#include "my_usb.h"
 
 #define STATE_IDLE 0
 #define STATE_TRIGGERED 1
-
-#define ENABLE_LED 1
 
 /* USER CODE END Includes */
 
@@ -86,7 +85,6 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
-volatile uint32_t wakeup_count = 1;
 uint8_t data_array[NRF_PAYLOAD_SIZE];
 uint8_t rx_address[5] = {0xBE,0xAD,0xA5,0xBA,0xBE};
 uint8_t tx_address[5] = {0xDA,0xBB,0xED,0xC0,0x0C};
@@ -96,11 +94,9 @@ int16_t diff;
 uint8_t button_result;
 uint8_t new_stat_packet = 1;
 uint8_t current_state = STATE_IDLE;
-uint32_t vbat_mV;
+uint16_t vbat_mV;
 uint16_t power_on_time_5s;
-
-#define EEPROM_BUF_SIZE 32
-uint8_t eeprom_buf[EEPROM_BUF_SIZE];
+uint16_t tof_sleep_ms;
 
 /* USER CODE END PV */
 
@@ -127,21 +123,10 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 /* USER CODE BEGIN 0 */
 int fputc(int ch, FILE *f)
 {
+  my_usb_putchar((uint8_t)ch);
+  if(daytripper_config.print_debug_info)
     HAL_UART_Transmit(&huart2, (unsigned char *)&ch, 1, 10);
-    return ch;
-}
-
-// this happens every 200ms
-void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc)
-{
-  if(wakeup_count % 6000 == 0) // 6000 * 0.2 = 20 minutes
-  {
-    check_battery(&vbat_mV);
-    new_stat_packet = 1;
-  }
-  if(wakeup_count % 25 == 0) // 25 * 0.2 = 5 seconds
-    power_on_time_5s++;
-  wakeup_count++;
+  return ch;
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
@@ -189,19 +174,18 @@ int main(void)
   MX_ADC_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
+  my_usb_init();
+  MX_RTC_Init();
+  HAL_RTC_DeactivateAlarm(&hrtc, RTC_ALARM_A);
   NRF_ON();
-  printf("\n\ndaytripper TX\ndekuNukem 2019\n\n");
+  dt_conf_load_default(&daytripper_config);
+  printf("\n\ndaytripper TX\ndekuNukem 2020\n\n");
+  dt_conf_load(&daytripper_config);
+  dt_conf_print(&daytripper_config);
   animation_init(&htim17, &htim2);
   start_animation(ANIMATION_TYPE_BREATHING);
   HAL_Delay(2000);
   check_battery(&vbat_mV);
-
-  while(1)
-  {
-    printf("hello world %d\n", HAL_GetTick());
-    check_battery(&vbat_mV);
-    HAL_Delay(1000);
-  }
 
   // this should be behind check_battery, so it can completely shut down in low battery situation
   MX_IWDG_Init();
@@ -213,50 +197,79 @@ int main(void)
   VL53L0X_init();
   setTimeout(500);
   // in microseconds, longer time better accruacy, but consumes more power
-  setMeasurementTimingBudget(25000); // default 33000
+  setMeasurementTimingBudget(daytripper_config.tof_timing_budget_ms * 1000); // default 33000
 
-  printf("initializing NRF...");
+  // printf("initializing NRF...");
   nrf24_init();
   nrf24_config(NRF_CHANNEL, NRF_PAYLOAD_SIZE);
   nrf24_tx_address(tx_address);
   nrf24_rx_address(rx_address);
   HAL_GPIO_WritePin(NRF_CE_GPIO_Port, NRF_CE_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_SET);
-  printf(" done\n");
+  // printf(" done\n");
 
   tof_calibrate(&baseline, &diff_threshold);
   start_animation(ANIMATION_TYPE_CONST_OFF);
   
-  MX_RTC_Init();
+  // while(1)
+  // {
+  //   HAL_IWDG_Refresh(&hiwdg);
+  //   printf("hello world %d\n", HAL_GetTick());
+  //   check_battery(&vbat_mV);
+  //   // rtc_sleep(&hrtc, 500);
+  //   char* result = my_usb_readline();
+  //   if(result != NULL)
+  //     printf("received: %s\n", result);
+  //   HAL_Delay(500);
+  // }
+
   while (1)
   {
     HAL_IWDG_Refresh(&hiwdg);
+    parse_cmd(my_usb_readline());
+
+    // every 5 seconds
+    if(rtc_counter > 5000)
+    {
+      power_on_time_5s++; // update power-on counter
+      if(power_on_time_5s % 120 == 0) // 5 * 120 = 600s = 10mins, send stat update every 10 minutes
+        new_stat_packet = 1;
+      check_battery(&vbat_mV);
+      rtc_counter = 0;
+    }
   /* USER CODE END WHILE */
 
   /* USER CODE BEGIN 3 */
-    button_result = button_update(HAL_GPIO_ReadPin(USER_BUTTON_GPIO_Port, USER_BUTTON_Pin), wakeup_count);
-    if(button_result == 1)
+    button_result = button_update(HAL_GPIO_ReadPin(USER_BUTTON_GPIO_Port, USER_BUTTON_Pin), rtc_sleep_count_ms);
+    if(button_result == 1) // short press
     {
       iwdg_wait(20, ANIMATION_TYPE_BREATHING);
       tof_calibrate(&baseline, &diff_threshold);
       iwdg_wait(20, ANIMATION_TYPE_CONST_OFF);
       current_state = STATE_IDLE;
     }
-    else if(button_result == 2)
+    else if(button_result == 2) // long press
       tx_test();
 
     if(new_stat_packet)
     {
       build_packet_stat(data_array, vbat_mV, power_on_time_5s);
-      printf("sending stat packet... ");
+      printf("sending stat... ");
       send_packet(data_array);
       new_stat_packet = 0;
     }
 
-    // get a new distance reading from laser ToF sensor
-    this_reading = get_single_distance_reading(&is_reading_valid);
-    diff = abs(baseline - this_reading);
+    // how long to sleep while wating for ToF sensor measurement
+    tof_sleep_ms = daytripper_config.tof_timing_budget_ms - 1;
+    if(vbat_mV > 4300) // if charging, dont sleep while wating for ToF measurement, but still update the time count
+    {
+      run_time_update(tof_sleep_ms + 5);
+      tof_sleep_ms = 0;
+    }
 
+    // get a new distance reading from laser ToF sensor
+    this_reading = get_single_distance_reading(&is_reading_valid, tof_sleep_ms);
+    diff = abs(baseline - this_reading);
     if(is_reading_valid == 0)
       goto sleep;
 
@@ -267,10 +280,10 @@ int main(void)
       uint16_t this;
       printf(">> b:%d t0:%d ", baseline, this_reading);
       // .. take another reading back-to-back, to make sure it's not sensor noise
-      while(count < WINDOW_SIZE)
+      while(count < daytripper_config.nr_sensitivity)
       {
       	HAL_IWDG_Refresh(&hiwdg);
-        this = get_single_distance_reading(&is_reading_valid);
+        this = get_single_distance_reading(&is_reading_valid, tof_sleep_ms);
         printf("t%d:%d ", count+1, this);
         if(is_reading_valid == 0)
           continue;
@@ -282,10 +295,10 @@ int main(void)
         count++;
       }
       printf("\n");
-      if(ENABLE_LED)
-      	start_animation(ANIMATION_TYPE_CONST_ON);
       build_packet_trig(data_array, baseline, this_reading);
       send_packet(data_array);
+      if(daytripper_config.use_led)
+        start_animation(ANIMATION_TYPE_CONST_ON);
       current_state = STATE_TRIGGERED;
     }
     else if(current_state == STATE_TRIGGERED && diff < diff_threshold)
@@ -297,7 +310,8 @@ int main(void)
     sleep:
     HAL_IWDG_Refresh(&hiwdg);
     nrf24_powerDown();
-    HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+    if(vbat_mV < 4300) // only sleep while on battery, when charging go full speed
+      rtc_sleep(&hrtc, daytripper_config.rtc_sleep_duration_ms);
   }
   /* USER CODE END 3 */
 
@@ -348,7 +362,7 @@ void SystemClock_Config(void)
 
   PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USB|RCC_PERIPHCLK_I2C1
                               |RCC_PERIPHCLK_RTC;
-  PeriphClkInit.I2c1ClockSelection = RCC_I2C1CLKSOURCE_HSI;
+  PeriphClkInit.I2c1ClockSelection = RCC_I2C1CLKSOURCE_SYSCLK;
   PeriphClkInit.RTCClockSelection = RCC_RTCCLKSOURCE_LSI;
   PeriphClkInit.UsbClockSelection = RCC_USBCLKSOURCE_HSI48;
 
@@ -413,7 +427,7 @@ static void MX_I2C1_Init(void)
 {
 
   hi2c1.Instance = I2C1;
-  hi2c1.Init.Timing = 0x2000090E;
+  hi2c1.Init.Timing = 0x00303D5B;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
@@ -447,7 +461,7 @@ static void MX_IWDG_Init(void)
 {
 
   hiwdg.Instance = IWDG;
-  hiwdg.Init.Prescaler = IWDG_PRESCALER_32;
+  hiwdg.Init.Prescaler = IWDG_PRESCALER_256;
   hiwdg.Init.Window = 4095;
   hiwdg.Init.Reload = 4095;
   if (HAL_IWDG_Init(&hiwdg) != HAL_OK)
@@ -477,7 +491,7 @@ static void MX_RTC_Init(void)
     */
   hrtc.Instance = RTC;
   hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
-  hrtc.Init.AsynchPrediv = 125;
+  hrtc.Init.AsynchPrediv = 18;
   hrtc.Init.SynchPrediv = 0;
   hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
   hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH;
@@ -489,41 +503,40 @@ static void MX_RTC_Init(void)
 
     /**Initialize RTC and set the Time and Date 
     */
-  sTime.Hours = 0x0;
-  sTime.Minutes = 0x0;
-  sTime.Seconds = 0x0;
+  sTime.Hours = 0;
+  sTime.Minutes = 0;
+  sTime.Seconds = 0;
   sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
   sTime.StoreOperation = RTC_STOREOPERATION_RESET;
-  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BCD) != HAL_OK)
+  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BIN) != HAL_OK)
   {
     _Error_Handler(__FILE__, __LINE__);
   }
 
   sDate.WeekDay = RTC_WEEKDAY_MONDAY;
   sDate.Month = RTC_MONTH_JANUARY;
-  sDate.Date = 0x1;
-  sDate.Year = 0x0;
+  sDate.Date = 1;
+  sDate.Year = 0;
 
-  if (HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BCD) != HAL_OK)
+  if (HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BIN) != HAL_OK)
   {
     _Error_Handler(__FILE__, __LINE__);
   }
 
     /**Enable the Alarm A 
     */
-  sAlarm.AlarmTime.Hours = 0x0;
-  sAlarm.AlarmTime.Minutes = 0x0;
-  sAlarm.AlarmTime.Seconds = 0x5;
-  sAlarm.AlarmTime.SubSeconds = 0x0;
+  sAlarm.AlarmTime.Hours = 0;
+  sAlarm.AlarmTime.Minutes = 0;
+  sAlarm.AlarmTime.Seconds = 5;
+  sAlarm.AlarmTime.SubSeconds = 0;
   sAlarm.AlarmTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
   sAlarm.AlarmTime.StoreOperation = RTC_STOREOPERATION_RESET;
-  sAlarm.AlarmMask = RTC_ALARMMASK_DATEWEEKDAY|RTC_ALARMMASK_HOURS
-                              |RTC_ALARMMASK_MINUTES;
+  sAlarm.AlarmMask = RTC_ALARMMASK_DATEWEEKDAY;
   sAlarm.AlarmSubSecondMask = RTC_ALARMSUBSECONDMASK_ALL;
   sAlarm.AlarmDateWeekDaySel = RTC_ALARMDATEWEEKDAYSEL_DATE;
-  sAlarm.AlarmDateWeekDay = 0x1;
+  sAlarm.AlarmDateWeekDay = 1;
   sAlarm.Alarm = RTC_ALARM_A;
-  if (HAL_RTC_SetAlarm_IT(&hrtc, &sAlarm, RTC_FORMAT_BCD) != HAL_OK)
+  if (HAL_RTC_SetAlarm_IT(&hrtc, &sAlarm, RTC_FORMAT_BIN) != HAL_OK)
   {
     _Error_Handler(__FILE__, __LINE__);
   }
@@ -637,7 +650,9 @@ static void MX_USART2_UART_Init(void)
   huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
   huart2.Init.OverSampling = UART_OVERSAMPLING_16;
   huart2.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_RXOVERRUNDISABLE_INIT|UART_ADVFEATURE_DMADISABLEONERROR_INIT;
+  huart2.AdvancedInit.OverrunDisable = UART_ADVFEATURE_OVERRUN_DISABLE;
+  huart2.AdvancedInit.DMADisableonRxError = UART_ADVFEATURE_DMA_DISABLEONRXERROR;
   if (HAL_HalfDuplex_Init(&huart2) != HAL_OK)
   {
     _Error_Handler(__FILE__, __LINE__);

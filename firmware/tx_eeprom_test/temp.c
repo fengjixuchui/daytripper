@@ -78,6 +78,99 @@ hrtc.Init.SynchPrediv = 0;
 period = 0.1976ms
 */
 
+for (int i = 0; i < EEPROM_BUF_SIZE; ++i)
+    printf("%d %d\n", i, eeprom_buf[i]);
+    
+    // printf("%d %d\n", HAL_GetTick(), rtc_sleep_count_ms); // this causes it to hang right away
+    // HAL_Delay(200);
+dt_ee: 6 255 1 1 12 25 82 0 1
+
+#define EEPROM_BUF_SIZE 32
+uint8_t eeprom_buf[EEPROM_BUF_SIZE];
+void rtc_sleep(RTC_HandleTypeDef *hrtc, uint32_t duration_ms)
+{
+  if(duration_ms <= 0)
+    return;
+  // 40KHz LSI, RTC asyc prediv 18, sync prediv 0
+  duration_ms *= 2;
+  if(HAL_RTC_GetTime(hrtc, &sTime, RTC_FORMAT_BIN) != HAL_OK)
+    return;
+  if(HAL_RTC_GetDate(hrtc, &sDate, RTC_FORMAT_BIN) != HAL_OK)
+    return;
+
+  next_alarm_second = sTime.Seconds + duration_ms;
+  next_alarm_minute = sTime.Minutes + next_alarm_second / 60;
+  next_alarm_hour = (sTime.Hours + next_alarm_minute / 60) % 24;
+  next_alarm_second %= 60;
+  next_alarm_minute %= 60;
+
+  // printf("---\n");
+  // printf("duration_ms: %d\n", duration_ms);
+  // printf("current: %d %d %d\n", sTime.Hours, sTime.Minutes, sTime.Seconds);
+  // printf("next: %d %d %d\n", next_alarm_hour, next_alarm_minute, next_alarm_second);
+  
+  sAlarm.AlarmTime.Seconds = next_alarm_second;
+  sAlarm.AlarmTime.Minutes = next_alarm_minute;
+  sAlarm.AlarmTime.Hours = next_alarm_hour;
+  sAlarm.AlarmTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+  sAlarm.AlarmTime.StoreOperation = RTC_STOREOPERATION_RESET;
+  sAlarm.AlarmMask = RTC_ALARMMASK_DATEWEEKDAY;//|RTC_ALARMMASK_HOURS;
+  sAlarm.AlarmSubSecondMask = RTC_ALARMSUBSECONDMASK_ALL;
+  sAlarm.AlarmDateWeekDaySel = RTC_ALARMDATEWEEKDAYSEL_DATE;
+  sAlarm.AlarmDateWeekDay = 1;
+  sAlarm.Alarm = RTC_ALARM_A;
+  if(HAL_RTC_DeactivateAlarm(hrtc, RTC_ALARM_A) != HAL_OK)
+    return;
+  // printf("1\n");
+  if(HAL_RTC_SetAlarm_IT(hrtc, &sAlarm, RTC_FORMAT_BIN) != HAL_OK)
+    return;
+  // printf("2\n");
+
+  // if(HAL_RTC_GetTime(hrtc, &sTime, RTC_FORMAT_BIN) != HAL_OK)
+  //   return;
+  // if(HAL_RTC_GetDate(hrtc, &sDate, RTC_FORMAT_BIN) != HAL_OK)
+  //   return;
+  // printf("now: %d %d %d\n", sTime.Hours, sTime.Minutes, sTime.Seconds);
+  HAL_SuspendTick();
+  HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+  HAL_ResumeTick();
+  rtc_sleep_count_ms += duration_ms/2;
+  rtc_counter += duration_ms/2;
+  huart2.Instance->CR1 &= ~(USART_CR1_UE);
+  huart2.Instance->BRR = 70;
+  huart2.Instance->CR1 |= USART_CR1_UE;
+  // if(HAL_RTC_GetTime(hrtc, &sTime, RTC_FORMAT_BIN) != HAL_OK)
+  //   return;
+  // if(HAL_RTC_GetDate(hrtc, &sDate, RTC_FORMAT_BIN) != HAL_OK)
+  //   return;
+  // printf("after: %d %d %d\n", sTime.Hours, sTime.Minutes, sTime.Seconds);
+  // printf("---\n");
+}
+// this happens every 200ms
+void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc)
+{
+  return;
+  if(wakeup_count % 6000 == 0) // 6000 * 0.2 = 20 minutes
+  {
+    check_battery(&vbat_mV);
+    new_stat_packet = 1;
+  }
+  if(wakeup_count % 25 == 0) // 25 * 0.2 = 5 seconds
+    power_on_time_5s++;
+  wakeup_count++;
+}
+
+  if(rtc_counter > 2000)
+  {
+    printf("two seconds passed\n");
+    rtc_counter = 0;
+  }
+
+  printf("duration_ms: %d\n", duration_ms);
+  printf("current: %d %d %d\n", sTime.Hours, sTime.Minutes, sTime.Seconds);
+  printf("next: %d %d %d\n", next_alarm_hour, next_alarm_minute, next_alarm_second);
+  printf("---\n");
+
   printf("ee_format: %d\n", ee_format());
   HAL_Delay(1);
 
@@ -503,3 +596,157 @@ int16_t this_reading = readRangeSingleMillimeters();
 
   // HAL_GPIO_WritePin(USER_LED_GPIO_Port, USER_LED_Pin, GPIO_PIN_SET);
   // HAL_GPIO_TogglePin(USER_LED_GPIO_Port, USER_LED_Pin);
+  while (1)
+  {
+  /* USER CODE END WHILE */
+
+  /* USER CODE BEGIN 3 */
+    if (HAL_RTC_DeactivateAlarm(&hrtc, RTC_ALARM_A) != HAL_OK)
+    {
+      _Error_Handler(__FILE__, __LINE__);
+    }
+    printf("alarm deleted\n");
+
+    RTC_TimeTypeDef sTime;
+    sTime.Hours = 0;
+    sTime.Minutes = 0;
+    sTime.Seconds = 0;
+    sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+    sTime.StoreOperation = RTC_STOREOPERATION_RESET;
+    if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BIN) != HAL_OK)
+    {
+      _Error_Handler(__FILE__, __LINE__);
+    }
+    printf("time cleared\n");
+
+    RTC_AlarmTypeDef sAlarm;
+    sAlarm.AlarmTime.Hours = 0;
+    sAlarm.AlarmTime.Minutes = 0;
+    sAlarm.AlarmTime.Seconds = 2;
+    sAlarm.AlarmTime.SubSeconds = 0;
+    sAlarm.AlarmTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+    sAlarm.AlarmTime.StoreOperation = RTC_STOREOPERATION_RESET;
+    sAlarm.AlarmMask = RTC_ALARMMASK_DATEWEEKDAY|RTC_ALARMMASK_HOURS
+                                |RTC_ALARMMASK_MINUTES;
+    sAlarm.AlarmSubSecondMask = RTC_ALARMSUBSECONDMASK_ALL;
+    sAlarm.AlarmDateWeekDaySel = RTC_ALARMDATEWEEKDAYSEL_DATE;
+    sAlarm.AlarmDateWeekDay = 1;
+    sAlarm.Alarm = RTC_ALARM_A;
+    if (HAL_RTC_SetAlarm_IT(&hrtc, &sAlarm, RTC_FORMAT_BIN) != HAL_OK)
+    {
+      _Error_Handler(__FILE__, __LINE__);
+    }
+    printf("alarm set\n");
+    HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+    HAL_GPIO_TogglePin(LOGIC_OUT_GPIO_Port, LOGIC_OUT_Pin);
+  }
+  /* USER CODE END 3 */
+
+
+void rtc_sleep(RTC_HandleTypeDef *hrtc, uint16_t duration_ms)
+{
+  duration_ms *= 2;
+  if(duration_ms > 3540)
+    duration_ms = 3540;
+  uint8_t next_alarm_second = duration_ms % 60;
+  uint8_t next_alarm_minute = duration_ms / 60;
+  // uint8_t next_alarm_hour = duration_ms / 3600;
+  RTC_TimeTypeDef sTime;
+  RTC_DateTypeDef sDate;
+  HAL_RTC_GetTime(hrtc, &sTime, RTC_FORMAT_BIN);
+  HAL_RTC_GetDate(hrtc, &sDate, RTC_FORMAT_BIN);
+
+  RTC_AlarmTypeDef sAlarm;
+  sAlarm.AlarmTime.Minutes = (sTime.Minutes + next_alarm_minute) % 60;
+  sAlarm.AlarmTime.Seconds = (sTime.Seconds + next_alarm_second) % 60;
+  // sAlarm.AlarmTime.Hours = (sTime.Hours + next_alarm_hour) % 24;
+  sAlarm.AlarmTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+  sAlarm.AlarmTime.StoreOperation = RTC_STOREOPERATION_RESET;
+  sAlarm.AlarmMask = RTC_ALARMMASK_DATEWEEKDAY|RTC_ALARMMASK_HOURS;
+  sAlarm.AlarmSubSecondMask = RTC_ALARMSUBSECONDMASK_ALL;
+  sAlarm.AlarmDateWeekDaySel = RTC_ALARMDATEWEEKDAYSEL_DATE;
+  sAlarm.AlarmDateWeekDay = 1;
+  sAlarm.Alarm = RTC_ALARM_A;
+  HAL_RTC_SetAlarm_IT(hrtc, &sAlarm, RTC_FORMAT_BIN);
+  HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+  HAL_RTC_DeactivateAlarm(hrtc, RTC_ALARM_A);
+}
+
+void rtc_sleep(RTC_HandleTypeDef *hrtc, uint32_t duration_ms)
+{
+  if(duration_ms <= 0)
+    return;
+  // 40KHz LSI, RTC asyc prediv 18, sync prediv 0
+  duration_ms *= 2;
+  RTC_TimeTypeDef sTime;
+  RTC_DateTypeDef sDate;
+  HAL_RTC_GetTime(hrtc, &sTime, RTC_FORMAT_BIN);
+  HAL_RTC_GetDate(hrtc, &sDate, RTC_FORMAT_BIN);
+
+  uint32_t next_alarm_second = sTime.Seconds + duration_ms;
+  uint32_t next_alarm_minute = sTime.Minutes + next_alarm_second / 60;
+  uint8_t next_alarm_hour = (sTime.Hours + next_alarm_minute / 60) % 24;
+  next_alarm_second %= 60;
+  next_alarm_minute %= 60;
+
+  printf("duration_ms: %d\n", duration_ms);
+  printf("current: %d %d %d\n", sTime.Hours, sTime.Minutes, sTime.Seconds);
+  printf("next: %d %d %d\n", next_alarm_hour, next_alarm_minute, next_alarm_second);
+  printf("---\n");
+
+  RTC_AlarmTypeDef sAlarm;
+  sAlarm.AlarmTime.Seconds = next_alarm_second;
+  sAlarm.AlarmTime.Minutes = next_alarm_minute;
+  sAlarm.AlarmTime.Hours = next_alarm_hour;
+  sAlarm.AlarmTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+  sAlarm.AlarmTime.StoreOperation = RTC_STOREOPERATION_RESET;
+  sAlarm.AlarmMask = RTC_ALARMMASK_DATEWEEKDAY;
+  sAlarm.AlarmSubSecondMask = RTC_ALARMSUBSECONDMASK_ALL;
+  sAlarm.AlarmDateWeekDaySel = RTC_ALARMDATEWEEKDAYSEL_DATE;
+  sAlarm.AlarmDateWeekDay = 1;
+  sAlarm.Alarm = RTC_ALARM_A;
+  HAL_RTC_SetAlarm_IT(hrtc, &sAlarm, RTC_FORMAT_BIN);
+  printf("sleeping...\n");
+  HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+  HAL_RTC_DeactivateAlarm(hrtc, RTC_ALARM_A);
+  rtc_sleep_duration_ms += duration_ms;
+}
+
+void rtc_sleep(RTC_HandleTypeDef *hrtc, uint32_t duration_ms)
+{
+  if(duration_ms <= 10)
+    return;
+  // __disable_irq();
+  // 40KHz LSI, RTC asyc prediv 18, sync prediv 0
+  duration_ms *= 2;
+  RTC_TimeTypeDef sTime;
+  RTC_DateTypeDef sDate;
+  HAL_RTC_GetTime(hrtc, &sTime, RTC_FORMAT_BIN);
+  HAL_RTC_GetDate(hrtc, &sDate, RTC_FORMAT_BIN);
+
+  uint32_t next_alarm_second = sTime.Seconds + duration_ms;
+  uint32_t next_alarm_minute = sTime.Minutes + next_alarm_second / 60;
+  uint8_t next_alarm_hour = (sTime.Hours + next_alarm_minute / 60) % 24;
+  next_alarm_second %= 60;
+  next_alarm_minute %= 60;
+
+  RTC_AlarmTypeDef sAlarm;
+  sAlarm.AlarmTime.Seconds = next_alarm_second;
+  sAlarm.AlarmTime.Minutes = next_alarm_minute;
+  sAlarm.AlarmTime.Hours = next_alarm_hour;
+  sAlarm.AlarmTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+  sAlarm.AlarmTime.StoreOperation = RTC_STOREOPERATION_RESET;
+  sAlarm.AlarmMask = RTC_ALARMMASK_DATEWEEKDAY|RTC_ALARMMASK_HOURS;
+  sAlarm.AlarmSubSecondMask = RTC_ALARMSUBSECONDMASK_ALL;
+  sAlarm.AlarmDateWeekDaySel = RTC_ALARMDATEWEEKDAYSEL_DATE;
+  sAlarm.AlarmDateWeekDay = 1;
+  sAlarm.Alarm = RTC_ALARM_A;
+  printf("sa\n");
+  uint8_t result = HAL_RTC_SetAlarm_IT(hrtc, &sAlarm, RTC_FORMAT_BIN);
+  printf("%d\n", result);
+  // __enable_irq();
+  // HAL_Delay(duration_ms);
+  HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+  HAL_RTC_DeactivateAlarm(hrtc, RTC_ALARM_A);
+  rtc_sleep_duration_ms += duration_ms;
+}
