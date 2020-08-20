@@ -91,7 +91,7 @@ uint8_t data_array[NRF_PAYLOAD_SIZE];
 uint8_t rx_address[5] = {0xBE,0xAD,0xA5,0xBA,0xBE};
 uint8_t tx_address[5] = {0xDA,0xBB,0xED,0xC0,0x0C};
 
-uint16_t baseline, diff_threshold, this_reading;
+uint16_t baseline, this_reading;
 int16_t diff;
 uint8_t button_result;
 uint8_t new_stat_packet = 1;
@@ -99,7 +99,7 @@ uint8_t current_state = STATE_IDLE;
 uint16_t vbat_mV;
 uint16_t vbat_mV_prev;
 uint16_t power_on_time_5s;
-
+uint16_t trigger_upper_threshold, trigger_lower_threshold;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -164,13 +164,21 @@ void rtc_calibrate(void)
 {
   rtc_calib_temp = HAL_GetTick();
   rtc_test(&hrtc, 200);
-  HAL_Delay(500);
+  HAL_Delay(300);
   is_rtc_calibrated = 1;
   if(rct_calibration_value < 184)
     rct_calibration_value = 184;
   else if(rct_calibration_value > 215)
     rct_calibration_value = 215;
   rtc_offset = rtc_calib_lookup[rct_calibration_value - 184];
+}
+
+uint8_t is_trigger(uint16_t thisss)
+{
+	// printf("%d (%d %d) (%d %d)\n", thisss, trigger_lower_threshold, trigger_upper_threshold, daytripper_config.range_max_mm, daytripper_config.range_min_mm);
+	if(thisss > daytripper_config.range_max_mm || thisss < daytripper_config.range_min_mm)
+		return 0;
+	return thisss < trigger_lower_threshold || thisss > trigger_upper_threshold;
 }
 
 /* USER CODE END 0 */
@@ -220,10 +228,16 @@ int main(void)
   dt_conf_load_default(&daytripper_config);
   printf("\n\ndaytripper TX\ndekuNukem 2020\n\n");
   dt_conf_load(&daytripper_config);
-  daytripper_config.tof_timing_budget_ms = 25;
-  daytripper_config.refresh_rate_Hz = 10;
-  daytripper_config.nr_sensitivity = 2;
+
+  // daytripper_config.tof_timing_budget_ms = 25;
+  // daytripper_config.refresh_rate_Hz = 5;
+  // daytripper_config.nr_sensitivity = 1;
   // daytripper_config.print_debug_info = 0;
+  // daytripper_config.tof_range_max_cm_div2 = 25;
+  // daytripper_config.tof_range_min_cm_div2 = 10;
+  // daytripper_config.range_max_mm = daytripper_config.tof_range_max_cm_div2 * 20;
+  // daytripper_config.range_min_mm = daytripper_config.tof_range_min_cm_div2 * 20;
+
   dt_conf_print(&daytripper_config);
   animation_init(&htim17, &htim2);
   start_animation(ANIMATION_TYPE_BREATHING);
@@ -231,8 +245,8 @@ int main(void)
   check_battery(&vbat_mV);
   vbat_mV_prev = vbat_mV;
   rtc_calibrate();
-  printf("rct_calibration_value: %d\n", rct_calibration_value);
-  printf("rtc_offset: %d\n", rtc_offset);
+  // printf("rct_calibration_value: %d\n", rct_calibration_value);
+  // printf("rtc_offset: %d\n", rtc_offset);
   // this should be behind check_battery, so it can completely shut down in low battery situation
   MX_IWDG_Init();
   /* USER CODE END 2 */
@@ -243,7 +257,7 @@ int main(void)
   // in microseconds, longer time better accruacy, but consumes more power
   setMeasurementTimingBudget((uint32_t)daytripper_config.tof_timing_budget_ms * 1000); // default 33000
 
-  printf("initializing NRF...");
+  // printf("initializing NRF...");
   nrf24_init();
   nrf24_config(NRF_CHANNEL, NRF_PAYLOAD_SIZE);
   tx_address[4] = daytripper_config.tx_wireless_channel;
@@ -251,8 +265,8 @@ int main(void)
   nrf24_rx_address(rx_address);
   HAL_GPIO_WritePin(NRF_CE_GPIO_Port, NRF_CE_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_SET);
-  printf(" done\n");
-  tof_calibrate(&baseline, &diff_threshold);
+  // printf(" done\n");
+  tof_calibrate(&baseline, &trigger_upper_threshold, &trigger_lower_threshold);
   start_measurement();
   start_animation(ANIMATION_TYPE_CONST_OFF);
   while (1)
@@ -264,9 +278,10 @@ int main(void)
     if(rtc_counter > 5000)
     {
       power_on_time_5s++; // update power-on counter
-      if(power_on_time_5s % 120 == 0) // 5 * 120 = 600s = 10mins, send stat update every 10 minutes
+      if(power_on_time_5s % 180 == 0) // 5 * 180 = 900s = 15mins, send stat update every 15 minutes
         new_stat_packet = 1;
       check_battery(&vbat_mV);
+      // printf("vbat_mV: %d\n", vbat_mV);
       rtc_counter = 0;
     }
 
@@ -277,7 +292,7 @@ int main(void)
     if(button_result == 1) // short press
     {
       iwdg_wait(20, ANIMATION_TYPE_BREATHING);
-      tof_calibrate(&baseline, &diff_threshold);
+      tof_calibrate(&baseline, &trigger_upper_threshold, &trigger_lower_threshold);
       iwdg_wait(20, ANIMATION_TYPE_CONST_OFF);
       start_measurement();
       current_state = STATE_IDLE;
@@ -294,26 +309,25 @@ int main(void)
     }
 
     // get a new distance reading from laser ToF sensor
-    this_reading = get_single_distance_reading(&is_reading_valid);
-    diff = abs(baseline - this_reading);
+    this_reading = get_continuous_distance_reading(&is_reading_valid);
     if(is_reading_valid == 0)
       goto sleep;
 
     // if the change in distance is big enough...
-    if(current_state == STATE_IDLE && diff > diff_threshold)
+    if(current_state == STATE_IDLE && is_trigger(this_reading))
     {
       uint8_t count = 0;
-      uint16_t this;
+      uint16_t temp;
       printf(">> b:%d t0:%d ", baseline, this_reading);
       // .. take another reading back-to-back, to make sure it's not sensor noise
       while(count < daytripper_config.nr_sensitivity)
       {
         HAL_IWDG_Refresh(&hiwdg);
-        this = get_instant_distance_reading(&is_reading_valid);
-        printf("t%d:%d ", count+1, this);
+        temp = get_single_distance_reading(&is_reading_valid);
+        printf("t%d:%d ", count+1, temp);
         if(is_reading_valid == 0)
           continue;
-        if(abs(baseline - this) <= diff_threshold)
+        if(is_trigger(temp) == 0)
         {
           printf("X\n");
           start_measurement();
@@ -329,7 +343,7 @@ int main(void)
       start_measurement();
       current_state = STATE_TRIGGERED;
     }
-    else if(current_state == STATE_TRIGGERED && diff < diff_threshold)
+    else if(current_state == STATE_TRIGGERED && is_trigger(this_reading) == 0)
     {
       start_animation(ANIMATION_TYPE_CONST_OFF);
       current_state = STATE_IDLE;
@@ -505,7 +519,7 @@ static void MX_IWDG_Init(void)
 {
 
   hiwdg.Instance = IWDG;
-  hiwdg.Init.Prescaler = IWDG_PRESCALER_256;
+  hiwdg.Init.Prescaler = IWDG_PRESCALER_32;
   hiwdg.Init.Window = 4095;
   hiwdg.Init.Reload = 4095;
   if (HAL_IWDG_Init(&hiwdg) != HAL_OK)

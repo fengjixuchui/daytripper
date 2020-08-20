@@ -8,6 +8,8 @@
 #include "nrf24.h"
 #include "ee.h"
 
+#define PEGGING_VALUE 1770
+
 #define BASELINE_SAMPLE_SIZE 16
 #define CHOP_SIZE 3
 
@@ -15,6 +17,7 @@
 #define STM32F0_UUID1 ((uint32_t *)0x1FFFF7B0)
 #define STM32F0_UUID2 ((uint32_t *)0x1FFFF7B4)
 
+double trigger_zone_threshold = 0.3333;
 dt_conf daytripper_config;
 dt_conf new_config;
 uint8_t is_reading_valid;
@@ -28,11 +31,10 @@ RTC_AlarmTypeDef sAlarm;
 uint32_t next_alarm_second;
 uint32_t next_alarm_minute;
 uint8_t next_alarm_hour;
-static const char eep_erase_failed[] = "EEPROM ERASE ERROR";
-static const char eep_write_failed[] = "EEPROM WRITE ERROR";
-static const char eep_read_failed[] = "EEPROM READ ERROR";
-static const char eep_invalid[] = "empty or invalid EEPROM, loading default.";
-static const char eep_write_invalid[] = "EEPROM VALUES INVALID";
+static const char eep_erase_failed[] = "ERASE ERR";
+static const char eep_write_failed[] = "WRITE ERR";
+static const char eep_read_failed[] = "READ ERR";
+static const char eep_invalid[] = "INVALID VAL";
 static const uint8_t fw_version_major = 1;
 static const uint8_t fw_version_minor = 1;
 static const uint8_t fw_version_patch = 0;
@@ -64,23 +66,23 @@ void bubbleSort(uint16_t arr[], uint16_t n)
         swap(&arr[j], &arr[j+1]); 
 }
 
-uint16_t get_single_distance_reading(uint8_t* is_valid)
+uint16_t get_continuous_distance_reading(uint8_t* is_valid)
 {
   uint16_t result = readRangeContinuousMillimeters();
   *is_valid = 1;
   if(result >= 1200)
-    result = 1700;
+    result = PEGGING_VALUE;
   if(result < 20)
     *is_valid = 0;
   return result;
 }
 
-uint16_t get_instant_distance_reading(uint8_t* is_valid)
+uint16_t get_single_distance_reading(uint8_t* is_valid)
 {
   uint16_t result = readRangeSingleMillimeters();
   *is_valid = 1;
   if(result >= 1200)
-    result = 1700;
+    result = PEGGING_VALUE;
   if(result < 20)
     *is_valid = 0;
   return result;
@@ -102,7 +104,7 @@ uint16_t get_baseline(void)
     uint32_t mean = 0;
     for (int i = 0; i < BASELINE_SAMPLE_SIZE; ++i)
     {
-      baseline_data[i] = get_instant_distance_reading(&is_reading_valid);
+      baseline_data[i] = get_single_distance_reading(&is_reading_valid);
       HAL_IWDG_Refresh(&hiwdg);
       HAL_Delay(100);
     }
@@ -119,22 +121,13 @@ uint16_t get_baseline(void)
     variance /= (BASELINE_SAMPLE_SIZE - CHOP_SIZE * 2);
 
     if(variance <= 300)
-    {
-      printf("baseline: %d\n", mean);
       return mean;
-    }
     
-    printf("\ncalibration failed - variance too large: %d, samples:\n", variance);
-    for (int i = CHOP_SIZE; i < BASELINE_SAMPLE_SIZE - CHOP_SIZE; ++i)
-      printf("%d ", baseline_data[i]);
-    printf("\n");
+    // printf("\ncalibration failed - variance too large: %d, samples:\n", variance);
+    // for (int i = CHOP_SIZE; i < BASELINE_SAMPLE_SIZE - CHOP_SIZE; ++i)
+    //   printf("%d ", baseline_data[i]);
+    // printf("\n");
   }
-}
-
-uint16_t get_trigger_threshold(uint16_t baseline)
-{
-  // smaller number narrower deadzone, more sensitive
-  return 0.3333*baseline;
 }
 
 void iwdg_wait(uint32_t msec, uint8_t ani_type)
@@ -145,11 +138,29 @@ void iwdg_wait(uint32_t msec, uint8_t ani_type)
     HAL_IWDG_Refresh(&hiwdg);
 }
 
-void tof_calibrate(uint16_t* base, uint16_t* threshold)
+void tof_calibrate(uint16_t* base, uint16_t* upper_threshold, uint16_t* lower_threshold)
 {
-  printf("VL53L0X calibrating... ");
+  printf("VL53L0X calibrating...\n");
   *base = get_baseline();
-  *threshold = get_trigger_threshold(*base);
+  printf("real: %d\n", *base);
+  if(*base >= daytripper_config.range_max_mm)
+  {
+    *base = daytripper_config.range_max_mm;
+    *upper_threshold = 9999;
+    *lower_threshold = daytripper_config.range_max_mm;
+  }
+  else if(*base <= daytripper_config.range_min_mm)
+  {
+    *base = daytripper_config.range_min_mm;
+    *upper_threshold = daytripper_config.range_min_mm;
+    *lower_threshold = 0;
+  }
+  else
+  {
+    *upper_threshold = *base * (trigger_zone_threshold + 1);
+    *lower_threshold = *base * (1 - trigger_zone_threshold);
+  }
+  printf("base: %d\nupper: %d\nlower: %d\n", *base, *upper_threshold, *lower_threshold);
 }
 
 // put this before IWDG_init so it can turn off after reset?
@@ -161,11 +172,12 @@ void check_battery(uint16_t* vbat_mV)
   *vbat_mV = 26*(uint16_t)HAL_ADC_GetValue(&hadc);
   HAL_ADC_Stop(&hadc);
   // printf("vbat: %d\n", *vbat_mV);
-  return;
+  // return;
 
-  if(*vbat_mV >= 2500 && *vbat_mV <= 3250) // 3250 after diode drop is about 3.5V
+  // if(*vbat_mV >= 2500 && *vbat_mV <= 3250)
+  if(*vbat_mV <= 3250) // 3250 after diode drop is about 3.5V
   {
-    // printf("low battery, shutting down...\n");
+    printf("low battery, shutting down...\n");
     start_animation(ANIMATION_TYPE_FASTBLINK);
     HAL_Delay(3000);
     start_animation(ANIMATION_TYPE_CONST_OFF);
@@ -241,9 +253,9 @@ void tx_test(void)
   while(1)
   {
     memset(test_data+2, count, 4);
-    for (int i = 0; i < 6; ++i)
-      printf("0x%x ", test_data[i]);
-    printf("\n");
+    // for (int i = 0; i < 6; ++i)
+    //   printf("0x%x ", test_data[i]);
+    // printf("\n");
     count++;
     send_packet(test_data);
     iwdg_wait(150, ANIMATION_TYPE_CONST_ON);
@@ -323,11 +335,6 @@ int32_t linear_buf_init(linear_buf *lb, int32_t size)
 {
   lb->buf_size = size;
   lb->buf = malloc(size);
-  while(lb->buf == NULL)
-  {
-    printf("out of memory\n");
-    HAL_Delay(250);
-  }
   lb->last_recv = 0;
   linear_buf_reset(lb);
   return 0;
@@ -370,6 +377,8 @@ void dt_conf_load_default(dt_conf *dtc)
 
   dtc->hardware_id = get_uuid();
   dtc->tof_model_id = get_tof_model_id();
+  dtc->range_max_mm = dtc->tof_range_max_cm_div2 * 20;
+  dtc->range_min_mm = dtc->tof_range_min_cm_div2 * 20;
 }
 
 uint8_t is_config_valid(uint8_t* arr)
@@ -404,22 +413,27 @@ void dt_conf_load(dt_conf *dtc)
   dtc->tx_wireless_channel = eeprom_buf[8];
   dtc->hardware_id = get_uuid();
   dtc->tof_model_id = get_tof_model_id();
+  dtc->range_max_mm = dtc->tof_range_max_cm_div2 * 20;
+  dtc->range_min_mm = dtc->tof_range_min_cm_div2 * 20;
 }
 
 void dt_conf_print(dt_conf *dtc)
 {
-  printf("refresh_rate_Hz: %d\n", dtc->refresh_rate_Hz);
-  printf("nr_sensitivity: %d\n", dtc->nr_sensitivity);
-  printf("tof_timing_budget_ms: %d\n", dtc->tof_timing_budget_ms);
-  printf("tof_range_max_cm_div2: %d\n", dtc->tof_range_max_cm_div2);
-  printf("tof_range_min_cm_div2: %d\n", dtc->tof_range_min_cm_div2);
-  printf("use_led: %d\n", dtc->use_led);
-  printf("op_mode: %d\n", dtc->op_mode);
-  printf("print_debug_info: %d\n", dtc->print_debug_info);
-  printf("tx_wireless_channel: 0x%x\n", dtc->tx_wireless_channel);
-  printf("hardware_id: 0x%x\n", dtc->hardware_id);
-  printf("tof_model_id: %d\n", dtc->tof_model_id);
-  printf("fw_version: %d.%d.%d\n", fw_version_major, fw_version_minor, fw_version_patch);
+  ;
+  // printf("refresh_rate_Hz: %d\n", dtc->refresh_rate_Hz);
+  // printf("nr_sensitivity: %d\n", dtc->nr_sensitivity);
+  // printf("tof_timing_budget_ms: %d\n", dtc->tof_timing_budget_ms);
+  // printf("tof_range_max_cm_div2: %d\n", dtc->tof_range_max_cm_div2);
+  // printf("tof_range_min_cm_div2: %d\n", dtc->tof_range_min_cm_div2);
+  // printf("range_max_mm: %d\n", dtc->range_max_mm);
+  // printf("range_min_mm: %d\n", dtc->range_min_mm);
+  // printf("use_led: %d\n", dtc->use_led);
+  // printf("op_mode: %d\n", dtc->op_mode);
+  // printf("print_debug_info: %d\n", dtc->print_debug_info);
+  // printf("tx_wireless_channel: 0x%x\n", dtc->tx_wireless_channel);
+  // printf("hardware_id: 0x%x\n", dtc->hardware_id);
+  // printf("tof_model_id: %d\n", dtc->tof_model_id);
+  // printf("fw_version: %d.%d.%d\n", fw_version_major, fw_version_minor, fw_version_patch);
 }
 
 char* goto_next_arg(char* buf)
@@ -466,7 +480,7 @@ void save_config(char* cmd)
   }
   if(is_config_valid(eeprom_buf) != 1)
   {
-    puts(eep_write_invalid);
+    puts(eep_invalid);
     return;
   }
   if(ee_format() != 1)
