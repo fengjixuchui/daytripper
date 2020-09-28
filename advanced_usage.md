@@ -92,7 +92,7 @@ Remember the number! **`COM5`** in this case. Yours might be different.
 
 [Head here to download the latest release](https://github.com/dekuNukem/daytripper/releases/latest) for Windows and macOS.
 
-* The software is in early stages of development. If you run into any problems, please don't hesitate to [open an issue](https://github.com/dekuNukem/daytripper/issues), DM me on discord `dekuNukem#6998`, or contact me through `dekuNukem`@`gmail`.`com`.
+* The software is in early stages of development. If you run into any problems, please don't hesitate to [open an issue](https://github.com/dekuNukem/daytripper/issues), ask in the [official Daytripper discord](https://discord.gg/mFBecVD), DM me on discord `dekuNukem#6998`, or contact me through `dekuNukem`@`gmail`.`com`.
 
 ### "Untrusted App" Warnings
 
@@ -214,8 +214,6 @@ There is a user button on both TX and RX board. Usually they are unused:
 
 ![Alt text](resources/photos/buttons.jpg)
 
-For TX, a short press (less than 2 seconds) recalibrates the baseline. A long press (more than 2 seconds) enters Test Mode, where it sends test packets with incrementing sequence number as payload every second. It can be used to test communication range. Turn it off then on again to exit Test Mode. 
-
 For RX, a press on the button types out some debug messages. Make sure you open a text editor first. If the RX has not received any messages from the TX, the debug values will all be zero.
 
 ## USB Firmware Updates
@@ -232,7 +230,7 @@ Locate the user button on the board:
 
 To update firmware:
 
-* Make sure the board is TURNED OFF and unplugged.
+* Make sure the board is **`TURNED OFF`** and unplugged.
 
 * **Press and hold down the user button** while plugging it into a computer.
 
@@ -248,11 +246,13 @@ You should see a `STM Device in DFU Mode` in the `Available DUF Devices` section
 
 ![Alt text](resources/photos/dfu_available.png)
 
+* If nothing shows up, you might need to install a driver. [Click me for details](dfu_driver_install.md)  
+
 Press the `Choose...` button and select a firmware file in `.dfu` format. Make sure it's the correct file!
 
-* [Click me](https://github.com/dekuNukem/daytripper/raw/master/firmware/dfu_files/TX_1.1.1.dfu) for latest default TX firmware
+* [Click me](https://github.com/dekuNukem/daytripper/raw/master/firmware/dfu_files/TX_1.1.2.dfu) for latest TX firmware (1.1.2)
 
-* [Click me](https://github.com/dekuNukem/daytripper/raw/master/firmware/dfu_files/RX_1.0.1.dfu) for latest default RX firmware
+* [Click me](https://github.com/dekuNukem/daytripper/raw/master/firmware/dfu_files/RX_1.0.1.dfu) for latest RX firmware (1.0.1)
 
 * [Click me](/firmware_version_history.md) for older firmwares.
 
@@ -270,6 +270,8 @@ It could take anywhere between a few seconds to a few minutes. Try using differe
 
 After uploading is complete, unplug and turn it back on to start using the new firmware. 
 
+* Your custom settings will be lost after flashing a new firmware, so make sure to set it up again!
+
 -----
 
 If you generated a `.hex` file yourself, you can convert it to a `.dfu` file with the `Dfu file manager` and then upload this way. 
@@ -286,7 +288,7 @@ On earlier production runs, the pin is on a testpad. On the later runs, the pin 
 
 Make sure **everything is on the same GND** when connecting external circuits!
 
-Unfortunately, TX does not have a dedicated trigger out pin due to limited microcontroller pins. However, there is a debug output that prints out some serial data upon triggering, which you can parse.
+Unfortunately, TX does not have a dedicated trigger out pin due to limited microcontroller pins. However, there is a debug output that prints out some serial data upon triggering at 115200bps, which you can parse.
 
 ![Alt text](resources/photos/tx_trig_out.jpg)
 
@@ -308,7 +310,7 @@ Untested, probably a mess.
 
 ## Questions or Comments?
 
-Please feel free to [open an issue](https://github.com/dekuNukem/duckypad/issues), DM me on discord `dekuNukem#6998`, or email `dekuNukem`@`gmail`.`com` for inquires.
+Please feel free to [open an issue](https://github.com/dekuNukem/duckypad/issues), ask in the [official Daytripper discord](https://discord.gg/mFBecVD), DM me on discord `dekuNukem#6998`, or email `dekuNukem`@`gmail`.`com` for inquires.
 
 ------
 

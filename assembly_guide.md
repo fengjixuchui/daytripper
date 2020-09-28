@@ -62,7 +62,9 @@ Wash your hands, grab the circuit board by its edge, and install the `TX board` 
 
 ![Alt text](resources/photos/tx_in.jpg)
 
-Screw on the `4x M2 Standoff 4mm`. Moderately tighten it.
+Screw on the `4x M2 Standoff 4mm`. Moderately tighten.
+
+* If you're using pilers, make sure it doesn't bump into circuit board components while turning!
 
 ![Alt text](resources/photos/tx_m2.jpg)
 
@@ -90,7 +92,7 @@ Now your Daytripper is ready to use! Head over to the [Quick Start Guide](/quick
 
 ## Questions or Comments?
 
-Please feel free to [open an issue](https://github.com/dekuNukem/duckypad/issues), DM me on discord `dekuNukem#6998`, or email `dekuNukem`@`gmail`.`com` for inquires.
+Please feel free to [open an issue](https://github.com/dekuNukem/duckypad/issues), ask in the [official Daytripper discord](https://discord.gg/mFBecVD), DM me on discord `dekuNukem#6998`, or email `dekuNukem`@`gmail`.`com` for inquires.
 
 ------
 
