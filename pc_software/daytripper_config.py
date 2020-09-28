@@ -15,16 +15,39 @@ from tkinter import simpledialog
 from tkinter import messagebox
 import serial.tools.list_ports
 import serial
+import urllib.request
 
-print('ddd')
-THIS_VERSION_NUMBER = '0.1.0'
+THIS_VERSION_NUMBER = '0.2.0'
 MAIN_WINDOW_WIDTH = 720
-MAIN_WINDOW_HEIGHT = 460
+MAIN_WINDOW_HEIGHT = 470
 PADDING = 10
 HEIGHT_CONNECT_LF = 50
+discord_link_url = "https://raw.githubusercontent.com/dekuNukem/daytripper/master/resources/discord_link.txt"
 
 def open_user_manual_url():
     webbrowser.open('https://github.com/dekuNukem/daytripper/blob/master/quick_start_guide.md')
+
+def open_discord_link():
+    try:
+        webbrowser.open(str(urllib.request.urlopen(discord_link_url).read().decode('utf-8')).split('\n')[0])
+    except Exception as e:
+        messagebox.showerror("Error", "Failed to open discord link!\n"+str(e))
+
+def create_help_window():
+    help_window = Toplevel(root)
+    help_window.title("Daytripper help")
+    help_window.geometry("280x130")
+    help_window.resizable(width=FALSE, height=FALSE)
+
+    user_manual_label = Label(master=help_window, text="Not sure what to do? Please read...")
+    user_manual_label.place(x=35, y=5)
+    user_manual_button = Button(help_window, text="User Manual", command=open_user_manual_url)
+    user_manual_button.place(x=60, y=30, width=160)
+
+    discord_label = Label(master=help_window, text="Questions or comments? Ask in...")
+    discord_label.place(x=35, y=60)
+    discord_button = Button(help_window, text="Official Discord Chatroom", command=open_discord_link)
+    discord_button.place(x=50, y=85, width=180)
 
 def ensure_dir(dir_path):
     if not os.path.exists(dir_path):
@@ -96,6 +119,23 @@ def get_max_range_cm():
         return 400
     return 0
 
+def fw_update_click(what):
+    webbrowser.open('https://github.com/dekuNukem/daytripper/blob/master/advanced_usage.md#usb-firmware-updates')
+
+def check_firmware_update():
+    fw_ver_string = str(daytripper_config.fw_version_major) + '.' + str(daytripper_config.fw_version_minor) + '.' + str(daytripper_config.fw_version_patch)
+    firmware_update_str_label.place(x=10, y=19)
+    fw_result = check_update.get_firmware_update_status(fw_ver_string)
+    if fw_result == 0:
+        firmware_update_str_label.config(text='Firmware (' + str(fw_ver_string) +'): Up to date')
+        firmware_update_str_label.unbind("<Button-1>")
+    elif fw_result == 1:
+        firmware_update_str_label.config(text='Firmware (' + str(fw_ver_string) +'): Update available! Click me!', fg='black', bg='orange', cursor="hand2")
+        firmware_update_str_label.bind("<Button-1>", fw_update_click)
+    else:
+        firmware_update_str_label.config(text='Firmware: Unknown')
+        firmware_update_str_label.unbind("<Button-1>")
+
 def serial_connect():
     if len(serial_var.get()) <= 1:
         return
@@ -121,7 +161,8 @@ def serial_connect():
     hwif_label_stringvar.set(make_info_string())
     enable_widgets()
     show_settings()
-
+    check_firmware_update()
+    
 def validate_dt_obj(dt_obj):
     if dt_obj.is_valid is False:
         messagebox.showerror("Error", 'Invalid configuration')
@@ -179,7 +220,7 @@ def serial_reset_all():
     opmode_reset_click()
     debug_reset_click()
 
-user_guide_button = Button(connection_lf, text="User Guide...", command=open_user_manual_url)
+user_guide_button = Button(connection_lf, text="How do I...", command=create_help_window)
 user_guide_button.place(x=PADDING, y=0, width=100)
 serial_refresh_button = Button(connection_lf, text="Refresh", command=serial_dropdown_refresh)
 serial_refresh_button.place(x=40+320, y=0, width=70)
@@ -390,11 +431,11 @@ debug_text = Label(debug_uart_lf, text=bin_to_text(daytripper_config.print_debug
 debug_info_button = Button(debug_uart_lf, text="What's this?", command=debug_popup)
 debug_reset_button = Button(debug_uart_lf, text="Reset to Default", command=debug_reset_click)
 
-backup_lf = LabelFrame(root, text="Backups", width=MAIN_WINDOW_WIDTH/2 - PADDING*2, height=HEIGHT_CONNECT_LF)
-updates_lf = LabelFrame(root, text="Updates", width=MAIN_WINDOW_WIDTH/2 - PADDING*2 + 5, height=HEIGHT_CONNECT_LF)
+backup_lf = LabelFrame(root, text="Backups", width=MAIN_WINDOW_WIDTH/2 - PADDING*2, height=HEIGHT_CONNECT_LF+10)
+updates_lf = LabelFrame(root, text="Updates", width=MAIN_WINDOW_WIDTH/2 - PADDING*2 + 5, height=HEIGHT_CONNECT_LF+10)
 updates_lf.place(x=365, y=400)
 update_str_label = Label(master=updates_lf, text="")
-update_str_label.place(x=PADDING, y=0)
+firmware_update_str_label = Label(master=updates_lf, text="")
 
 def current_time_str():
     return str(datetime.datetime.now().isoformat(sep='T') + "Z ").replace('-', '').replace(':', '').split('.')[0]
@@ -574,28 +615,23 @@ def show_settings():
 
     backup_lf.place(x=PADDING, y=400)
 
-    dump_setting_button.place(x=PADDING, y=0, width=180)
-    load_setting_button.place(x=200, y=0, width=130)
-
-# if check_update.has_update(THIS_VERSION_NUMBER):
-#     update_str_label.config(text='Update available!\nClick me', fg='white', bg='blue', cursor="hand2")
-#     update_str_label.bind("<Button-1>", update_click)
+    dump_setting_button.place(x=PADDING, y=5, width=180)
+    load_setting_button.place(x=200, y=5, width=130)
 
 def update_click(event):
     webbrowser.open('https://github.com/dekuNukem/daytripper/releases')
 
-update_result = check_update.has_update(THIS_VERSION_NUMBER)
+update_result = check_update.get_pc_app_update_status(THIS_VERSION_NUMBER)
+update_str_label.place(x=10, y=-2)
 if update_result == 0:
-    update_str_label.config(text='Already up-to-date')
-    update_str_label.place(x=100, y=0)
+    update_str_label.config(text='This app (' + str(THIS_VERSION_NUMBER) + '): Up to date')
+    update_str_label.unbind("<Button-1>")
 elif update_result == 1:
-    update_str_label.config(text='Update available! Click me', fg='white', bg='blue', cursor="hand2")
+    update_str_label.config(text='This app (' + str(THIS_VERSION_NUMBER) + '): Update available! Click me!', fg='black', bg='orange', cursor="hand2")
     update_str_label.bind("<Button-1>", update_click)
-    update_str_label.place(x=80, y=0)
 elif update_result == 2:
-    update_str_label.config(text='Update check failed. Click me to check manually.', fg='white', bg='blue', cursor="hand2")
-    update_str_label.bind("<Button-1>", update_click)
-    update_str_label.place(x=15, y=0)
+    update_str_label.config(text='This app (' + str(THIS_VERSION_NUMBER) + '): Unknown')
+    update_str_label.unbind("<Button-1>")
 
 serial_dropdown_refresh()
 # serial_connect()
